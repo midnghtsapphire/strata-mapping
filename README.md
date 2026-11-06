@@ -24,20 +24,24 @@ Computes LRM = DTM − Gaussian(DTM, σ) from USGS 3DEP 1 m bare-earth DTM for a
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-python3 -m pytest -v tests            # synthetic-fixture tests (4)
+python3 -m pytest -v tests            # synthetic-fixture tests
 ```
 
 ### Manual run
 ```bash
 python3 lrm_3dep.py --bbox -105.2800 40.0100 -105.2750 40.0140 --sigma-m 10 -o lrm.tif
 # optional fallback: export OPENTOPO_API_KEY=...; add --source opentopo
-# offline: python3 lrm_3dep.py --input my_dtm.tif [--bbox ...] -o lrm.tif
+# offline full file:
+python3 lrm_3dep.py --input my_dtm.tif --sigma-m 10 -o lrm.tif
+# offline crop (four lon/lat floats required):
+python3 lrm_3dep.py --input my_dtm.tif --bbox -105.2800 40.0100 -105.2750 40.0140 --sigma-m 10 -o lrm.tif
 ```
 
 ### Behaviour
-- Source 1: USGS TNM Access API lists 1 m DEM COGs; windowed over HTTP via GDAL `/vsicurl/` (no full-tile download). Deterministic mosaics for a fixed TNM response.
-- Source 2: OpenTopography `API/usgsdem?datasetName=USGS1m` with `OPENTOPO_API_KEY`.
-- σ in meters, converted to pixels from DTM pixel size (projected metric CRS required).
-- Nodata-aware smoothing; output float32, nodata −9999, LZW, source CRS/transform preserved.
+- Source 1 (TNM): USGS TNM Access API lists 1 m DEM COGs; **paginated** until complete (hard-fail if truncated). Windowed over HTTP via GDAL `/vsicurl/` (no full-tile download). Mixed-CRS tiles are reprojected into the first tile's CRS via `WarpedVRT` (never silently dropped). Deterministic mosaics for a fixed TNM response.
+- Source 2 (OpenTopography): downloads the requested bbox GeoTIFF (not streamed), with request timeout; temp file always unlinked. Needs `OPENTOPO_API_KEY`.
+- σ in meters; CRS must be projected with known linear units (meters or feet — feet are converted). Geographic CRS hard-fails.
+- Edge halo (~4σ) is read before smoothing, then cropped back to the requested bbox.
+- Nodata-aware smoothing; boundless fill value always matches the nodata mask; output float32, nodata −9999, LZW.
 
 Sources listed under `Library/`.

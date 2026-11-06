@@ -4,7 +4,7 @@ Finish each item before opening the next.
 
 1. Streamed topography foundation  
    Done when a player can move across one real-world patch from public data only.  
-   **Evidence (2026-11-05):** `lrm_3dep.py` CLI streams USGS 3DEP 1 m bare-earth DTM (TNM COGs / OpenTopography fallback) for a lon/lat bbox and writes a nodata-aware Gaussian Local Relief Model GeoTIFF. Synthetic pytest suite in `tests/test_lrm.py` (4 tests). Refs midnghtsapphire/revvel-standards#18207.
+   **Evidence (2026-11-05):** `lrm_3dep.py` CLI streams USGS 3DEP 1 m bare-earth DTM from TNM COGs (HTTP windowed `/vsicurl/`) for a lon/lat bbox and writes a nodata-aware Gaussian Local Relief Model GeoTIFF. OpenTopography is a fallback that **downloads** the requested bbox GeoTIFF (not streamed). Synthetic pytest suite in `tests/test_lrm.py`. Refs midnghtsapphire/revvel-standards#18207.
 
 2. Mapping driver + gap fill  
    Done when a gap becomes navigable after the driver pass and the player can ignore the driver.
