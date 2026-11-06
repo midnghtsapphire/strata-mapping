@@ -107,7 +107,7 @@ def test_read_local_nodata_zero_fill_consistent(tmp_path):
     """SYNTHETIC: nodata=0 must fill with 0, not -9999."""
     path = tmp_path / "zero_nd.tif"
     dtm = np.full((30, 30), 100.0, dtype="float32")
-    dtm[0:3, 0:3] = 0.0
+    assert np.all(dtm != 0.0)  # source cells all nonzero; zeros may come only from OOB fill
     tr = from_origin(500000, 4400000, 1.0, 1.0)
     with rasterio.open(
         path, "w", driver="GTiff", height=30, width=30, count=1, dtype="float32",
@@ -117,9 +117,18 @@ def test_read_local_nodata_zero_fill_consistent(tmp_path):
     west, south, east, north = transform_bounds(
         "EPSG:26913", "EPSG:4326", 499990, 4399990, 500015, 4400015, densify_pts=21
     )
-    arr, _, _, nd = m.read_local(str(path), (west, south, east, north))
+    arr, out_tr, _, nd = m.read_local(str(path), (west, south, east, north))
     assert nd == 0.0
     assert (arr == 0.0).any()
+    rr, cc = np.meshgrid(np.arange(arr.shape[0]), np.arange(arr.shape[1]), indexing="ij")
+    xs, ys = rasterio.transform.xy(out_tr, rr.ravel(), cc.ravel(), offset="center")
+    src_rows, src_cols = rasterio.transform.rowcol(tr, xs, ys)
+    src_rows = np.asarray(src_rows).reshape(arr.shape)
+    src_cols = np.asarray(src_cols).reshape(arr.shape)
+    in_bounds = (src_rows >= 0) & (src_rows < 30) & (src_cols >= 0) & (src_cols < 30)
+    assert np.all(arr[in_bounds] == 100.0)
+    assert np.all(arr[~in_bounds] == 0.0)
+    assert (~in_bounds).any()
 
 
 # ---- P1: TNM pagination ----
@@ -223,11 +232,14 @@ def test_feet_crs_converts_sigma(tmp_path):
     px = m.pixel_size_meters(CRS.from_epsg(2263), tr)
     assert abs(px - to_m) < 1e-9
     m.main(["--input", str(path), "--sigma-m", "3", "-o", str(tmp_path / "out.tif")])
-    # sigma_px = 3 / px ≈ 9.84
+    # sigma_px = 3 / px ≈ 9.84; CLI path is local_relief(arr, nd, sigma_px)
     expected_sigma_px = 3.0 / px
     with rasterio.open(tmp_path / "out.tif") as out:
         assert out.crs.to_epsg() == 2263
-        assert out.read(1)[20, 20] != 0  # spike produces non-zero LRM
+        # Fixture has no nodata pixels; nodata=None matches the (dtm, nodata, sigma_px) signature
+        np.testing.assert_allclose(
+            out.read(1), m.local_relief(dtm, None, expected_sigma_px), atol=1e-5
+        )
 
 
 def test_sigma_m_must_be_positive(tmp_path):

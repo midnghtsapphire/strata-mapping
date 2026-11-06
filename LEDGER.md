@@ -1,5 +1,22 @@
 # LEDGER — strata-mapping
 
+## 2026-11-06 10:30 America/Denver — MechSensorForge — correction to 2026-11-06 08:20 review-fix identifiers and 2026-11-05 Files inventory
+
+Prior 2026-11-06 08:20 review-fix ledger entry lost backtick identifiers (shell backtick expansion). Restoring the concrete identifiers here per the append-only / never-rewrite rule; the original entry below is left intact. The 2026-11-06 correction note to the 2026-11-05 entry also lost its filename.
+
+- **Actor:** MechSensorForge
+- **Requested by:** Audrey Evans (Cubic review on PR #2; Sense-Strata follow-up)
+- **Role:** executed
+- **Restored Files for `3712474`:** `CHANGELOG.md` (changed); `LEDGER.md` (changed); `PLAN.md` (changed); `README.md` (changed); `lrm_3dep.py` (changed); `tests/test_lrm.py` (changed)
+- **Restored symbols:** `effective_nodata`; `WarpedVRT`; TNM pagination (`offset`/`max`); `pixel_size_meters` (interim mean of `|a|` and `|e|` in metres)
+- **Restored branch / commit:** `mech/strata-lrm-2026-11-05` @ `37124744890ca78a2774833b25d3ac520e024fd5` (short `3712474`); PR #2 (later squash-merged into `daily/2026-11-05` as `ee6e980bea854a89a6ace310a3d84cafec2a3894` by Proofy; MechSensorForge did not self-merge)
+- **2026-11-05 inventory omission:** `.gitignore` (added in the port commit `0aa94eb96ebf7db9fe26f1305a85f248d2748c55`). Recorded here; original 2026-11-05 Files list left intact.
+- **This follow-up (same commit as this entry):** `LEDGER.md` (changed); `CHANGELOG.md` (changed); `tests/test_lrm.py` (changed) — Cubic zero-nodata fixture (source cells all nonzero; only out-of-bounds fill is 0) and feet-CRS CLI vs `local_relief(dtm, None, expected_sigma_px)` check. Branch `mech/strata-cubic-fixes-2026-11-06` targeting `daily/2026-11-05`.
+- **What was done:** Append-only identifier restoration and two synthetic test tightenings. No merge; no main edits; no Actions; nothing deleted.
+- **Open / handoff:** Follow-up WR for anisotropic/rotated-pixel sigma, warp/merge nodata-seam tests, and opt-in live TNM/OpenTopo smoke: #3. Next owner: Sense-Strata / Audrey
+- **Credit note:** MechSensorForge cubic-follow-up on own authored work
+
+
 ## 2026-11-06 08:20 America/Denver — MechSensorForge — Sense-Strata / gitar / cubic P1 review fixes
 
 - **Actor:** MechSensorForge

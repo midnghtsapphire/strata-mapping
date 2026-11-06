@@ -6,6 +6,7 @@
 - P1 TNM: paginate `offset`/`max` until `total` items fetched; hard-fail on truncation/stall (no silent max=50 cut).
 - P1 Mixed CRS: reproject tiles into the first tile's CRS via `WarpedVRT` (never silently drop).
 - P1 Units: require projected CRS; convert feet via `linear_units_factor`; hard-fail geographic CRS before `sigma_m / px`.
+- Cubic follow-up on merged PR #2: append-only ledger correction restoring `3712474` file/symbol/branch identifiers and recording `.gitignore` (added); zero-nodata test keeps source cells nonzero so only out-of-bounds fill is 0; feet-CRS test compares CLI output to `local_relief(dtm, None, expected_sigma_px)`.
 ### Added
 - P2: OpenTopography temp unlink + request timeout; ~4σ edge halo then crop; `--sigma-m` must be finite and > 0; synthetic P1 tests; README/PLAN nits (offline example; TNM vs OT streaming wording).
 
