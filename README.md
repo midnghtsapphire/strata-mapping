@@ -24,7 +24,9 @@ Computes LRM = DTM − Gaussian(DTM, σ) from USGS 3DEP 1 m bare-earth DTM for a
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-python3 -m pytest -v tests            # synthetic-fixture tests
+python3 -m pytest -v tests            # synthetic-fixture tests; live smoke skipped
+# optional network (OpenTopography also needs OPENTOPO_API_KEY in the environment; never commit it):
+# STRATA_LIVE_SMOKE=1 python3 -m pytest -v tests -m live_smoke
 ```
 
 ### Manual run
@@ -38,9 +40,9 @@ python3 lrm_3dep.py --input my_dtm.tif --bbox -105.2800 40.0100 -105.2750 40.014
 ```
 
 ### Behaviour
-- Source 1 (TNM): USGS TNM Access API lists 1 m DEM COGs; **paginated** until complete (hard-fail if truncated). Windowed over HTTP via GDAL `/vsicurl/` (no full-tile download). Mixed-CRS tiles are reprojected into the first tile's CRS via `WarpedVRT` (never silently dropped). Deterministic mosaics for a fixed TNM response.
+- Source 1 (TNM): USGS TNM Access API lists 1 m DEM COGs; **paginated** until complete (hard-fail if truncated). Windowed over HTTP via GDAL `/vsicurl/` (no full-tile download). Mixed-CRS tiles are reprojected into the first tile's CRS via `WarpedVRT` (never silently dropped). Resampling is nearest in the warp and again when the tiles are merged. On a 20 m pixel the half-pixel box of the synthetic slope (0.05 per metre east, 0.02 per metre north) is 0.7 m, so two stages are about 1.4 m; the test allows 1.5 m. Deterministic mosaics for a fixed TNM response. The opt-in TNM smoke calls `read_tnm` (list and merge). Its bbox is one UTM zone, so that live call does not open a `WarpedVRT`; mixed-CRS warp is covered by the synthetic tests.
 - Source 2 (OpenTopography): downloads the requested bbox GeoTIFF (not streamed), with request timeout; temp file always unlinked. Needs `OPENTOPO_API_KEY`.
-- σ in meters; CRS must be projected with known linear units (meters or feet — feet are converted). Geographic CRS hard-fails.
+- σ in meters is applied per axis from the absolute pixel sizes `|a|` and `|e|` (after converting feet). The axes are not averaged. A rotated or sheared affine (`b` or `d` nonzero) is an error: a rotated-pixel kernel is not implemented. CRS must be projected with known linear units. Geographic CRS hard-fails.
 - Edge halo (~4σ) is read before smoothing, then cropped back to the requested bbox.
 - Nodata-aware smoothing; boundless fill value always matches the nodata mask; output float32, nodata −9999, LZW.
 

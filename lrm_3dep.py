@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse, json, math, os, sys, tempfile, urllib.parse, urllib.request
 import numpy as np
 import rasterio
+from rasterio.enums import Resampling
 from rasterio.merge import merge
 from rasterio.vrt import WarpedVRT
 from rasterio.warp import transform_bounds
@@ -28,17 +29,45 @@ OT_TIMEOUT_S = 60
 HALO_SIGMA_MULT = 4.0
 
 
-def local_relief(dtm: np.ndarray, nodata, sigma_px: float) -> np.ndarray:
-    """Nodata-aware Gaussian LRM (normalized convolution). Returns float32."""
-    if not math.isfinite(sigma_px) or sigma_px <= 0:
-        raise ValueError(f"sigma_px must be finite and > 0, got {sigma_px!r}")
+def _gaussian_sigma(sigma_px):
+    """Scalar, or (sigma_row, sigma_col) for scipy.ndimage (y, then x).
+
+    A float still means the same sigma on every axis so existing callers keep working.
+    """
+    if isinstance(sigma_px, (str, bytes)):
+        raise ValueError(
+            f"sigma_px must be a positive float or (sigma_row, sigma_col), got {sigma_px!r}"
+        )
+    arr = np.asarray(sigma_px, dtype="float64")
+    if arr.ndim == 0:
+        values = (float(arr),)
+        sigma_arg = values[0]
+    elif arr.ndim == 1 and arr.shape == (2,):
+        values = (float(arr[0]), float(arr[1]))
+        sigma_arg = values
+    else:
+        raise ValueError(
+            f"sigma_px must be a positive float or (sigma_row, sigma_col), got {sigma_px!r}"
+        )
+    for s in values:
+        if not math.isfinite(s) or s <= 0:
+            raise ValueError(f"sigma_px must be finite and > 0, got {sigma_px!r}")
+    return sigma_arg
+
+
+def local_relief(dtm: np.ndarray, nodata, sigma_px) -> np.ndarray:
+    """Nodata-aware Gaussian LRM (normalized convolution). Returns float32.
+
+    `sigma_px` is a float (isotropic) or `(sigma_row, sigma_col)` in pixels.
+    """
+    sigma_arg = _gaussian_sigma(sigma_px)
     a = dtm.astype("float64")
     valid = np.isfinite(a)
     if nodata is not None:
         valid &= a != nodata
     filled = np.where(valid, a, 0.0)
-    w = gaussian_filter(valid.astype("float64"), sigma_px, mode="nearest")
-    s = gaussian_filter(filled, sigma_px, mode="nearest")
+    w = gaussian_filter(valid.astype("float64"), sigma_arg, mode="nearest")
+    s = gaussian_filter(filled, sigma_arg, mode="nearest")
     with np.errstate(invalid="ignore", divide="ignore"):
         smooth = s / w
     out = np.where(valid & (w > 1e-6), a - smooth, NODATA_OUT)
@@ -66,14 +95,60 @@ def meters_per_crs_unit(crs) -> float:
     return float(to_m)
 
 
-def pixel_size_meters(crs, transform) -> float:
-    """Mean absolute pixel size in meters (handles non-square / feet CRS)."""
+def _reject_rotated_or_sheared(transform) -> None:
+    """|a| and |e| are not the ground pixel size once the axes are rotated or sheared.
+
+    The predicate is `not (abs(component) <= tol)` so a NaN shear fails closed.
+    `abs(nan) > tol` is False, and that form would accept a NaN radius.
+    """
+    b = float(transform.b)
+    d = float(transform.d)
+    scale = max(abs(float(transform.a)), abs(float(transform.e)), 1.0)
+    tol = 1e-9 * scale
+    if not (abs(b) <= tol) or not (abs(d) <= tol):
+        raise ValueError(
+            "rotated or sheared affine is not supported for Gaussian sigma "
+            f"(b={b}, d={d}; axis-aligned tolerance {tol:g}). "
+            "Refusing a silent wrong radius; a rotated-pixel kernel is not implemented."
+        )
+
+
+def pixel_size_meters(crs, transform) -> tuple[float, float]:
+    """Per-axis pixel size in meters from the affine, not mean(|a|, |e|).
+
+    Returns `(px_x, px_y)` = `(|a|, |e|)` times the CRS linear-unit factor
+    (column, then row). North-up rasters have `e < 0`; the sign is dropped.
+    Raises ValueError when `b` or `d` is outside the axis-aligned tolerance, including
+    NaN, or when either axis is not a finite positive length.
+    """
+    _reject_rotated_or_sheared(transform)
     to_m = meters_per_crs_unit(crs)
-    px_x = abs(transform.a) * to_m
-    px_y = abs(transform.e) * to_m
+    px_x = abs(float(transform.a)) * to_m
+    px_y = abs(float(transform.e)) * to_m
     if px_x <= 0 or px_y <= 0 or not math.isfinite(px_x) or not math.isfinite(px_y):
         raise ValueError(f"invalid pixel size from transform {transform}")
-    return (px_x + px_y) / 2.0
+    return (px_x, px_y)
+
+
+def gaussian_sigma_px(sigma_m: float, px_x: float, px_y: float) -> tuple[float, float]:
+    """Gaussian sigma in pixels as `(sigma_row, sigma_col)` for scipy.ndimage.
+
+    Row is northing (`sigma_m / px_y`); column is easting (`sigma_m / px_x`).
+    """
+    if not math.isfinite(sigma_m) or sigma_m <= 0:
+        raise ValueError(f"sigma_m must be finite and > 0, got {sigma_m!r}")
+    if min(px_x, px_y) <= 0 or not math.isfinite(px_x) or not math.isfinite(px_y):
+        raise ValueError(f"pixel sizes must be finite and > 0, got px_x={px_x!r} px_y={px_y!r}")
+    return (sigma_m / px_y, sigma_m / px_x)
+
+
+def halo_pixels(sigma_m: float, px_x: float, px_y: float) -> tuple[int, int]:
+    """Kernel halo in `(rows, cols)`, about 4 sigma on each axis independently."""
+    sigma_row, sigma_col = gaussian_sigma_px(sigma_m, px_x, px_y)
+    return (
+        int(math.ceil(HALO_SIGMA_MULT * sigma_row)),
+        int(math.ceil(HALO_SIGMA_MULT * sigma_col)),
+    )
 
 
 def tnm_fetch_page(bbox, offset: int, max_n: int = TNM_PAGE_SIZE) -> dict:
@@ -158,7 +233,17 @@ def open_aligned_tiles(urls: list[str]):
             if s.crs == target_crs:
                 aligned.append(s)
             else:
-                vrt = WarpedVRT(s, crs=target_crs)
+                # GDAL's default destination nodata is 0 when the source tag is
+                # missing. That writes a 0 seam around the warped tile. Use the
+                # same effective nodata as read_local, and nearest resampling so
+                # nodata does not bleed into valid elevations.
+                vrt = WarpedVRT(
+                    s,
+                    crs=target_crs,
+                    src_nodata=s.nodata,
+                    nodata=effective_nodata(s.nodata),
+                    resampling=Resampling.nearest,
+                )
                 wrappers.append(vrt)
                 aligned.append(vrt)
         return aligned, target_crs, raw + wrappers
@@ -170,20 +255,39 @@ def open_aligned_tiles(urls: list[str]):
         raise
 
 
+def merge_aligned(srcs, bounds=None):
+    """Merge datasets that already share a CRS.
+
+    Output nodata is `effective_nodata` of the first dataset. Pixels outside
+    every tile (a bounds window larger than the mosaic, the boundless case)
+    stay that nodata value. Each source is masked with its own nodata, so a
+    nodata sample on one tile does not punch a hole where a later tile has data.
+    Resolution and alignment follow the first dataset. Nearest resampling keeps
+    nodata from blending into neighboring elevations.
+    """
+    if not srcs:
+        raise RuntimeError("no tiles to merge")
+    nd = effective_nodata(srcs[0].nodata)
+    kwargs = {"nodata": nd, "resampling": Resampling.nearest, "method": "first"}
+    if bounds is not None:
+        kwargs["bounds"] = bounds
+    arr, tr = merge(srcs, **kwargs)
+    return arr[0], tr, nd
+
+
 def read_tnm(bbox, sigma_m: float | None = None):
     urls = tnm_cog_urls(bbox)
     srcs, crs, handles = open_aligned_tiles(urls)
     try:
-        nd = effective_nodata(srcs[0].nodata)
         b = transform_bounds("EPSG:4326", crs, *bbox, densify_pts=21)
         if sigma_m is not None and sigma_m > 0:
             to_m = meters_per_crs_unit(crs)
             pad = HALO_SIGMA_MULT * sigma_m / to_m
             b = (b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad)
-        arr, tr = merge(srcs, bounds=b, nodata=nd)
+        arr, tr, nd = merge_aligned(srcs, bounds=b)
         # Crop halo after merge so LRM edges use real terrain
         core = transform_bounds("EPSG:4326", crs, *bbox, densify_pts=21)
-        return arr[0], tr, crs, nd, urls, core
+        return arr, tr, crs, nd, urls, core
     finally:
         for s in handles:
             s.close()
@@ -228,19 +332,38 @@ def read_opentopo(bbox, sigma_m: float | None = None):
             pass
 
 
-def read_local(path, bbox, halo_px: int = 0):
-    """Read local GeoTIFF. Boundless fill value == returned nodata (never mismatched)."""
+def _halo_rc(halo_px) -> tuple[int, int]:
+    """Accept an int (both axes) or `(rows, cols)` so square callers stay valid."""
+    if isinstance(halo_px, (int, np.integer)):
+        h = int(halo_px)
+        if h < 0:
+            raise ValueError(f"halo_px must be >= 0, got {halo_px!r}")
+        return h, h
+    if isinstance(halo_px, (tuple, list)) and len(halo_px) == 2:
+        hy, hx = int(halo_px[0]), int(halo_px[1])
+        if hy < 0 or hx < 0:
+            raise ValueError(f"halo_px must be >= 0, got {halo_px!r}")
+        return hy, hx
+    raise ValueError(f"halo_px must be an int or (rows, cols), got {halo_px!r}")
+
+
+def read_local(path, bbox, halo_px: int | tuple[int, int] = 0):
+    """Read local GeoTIFF. Boundless fill value == returned nodata (never mismatched).
+
+    `halo_px` is an int, or `(rows, cols)` when the pixel axes differ.
+    """
     with rasterio.open(path) as src:
         nd = effective_nodata(src.nodata)
         if bbox:
             b = transform_bounds("EPSG:4326", src.crs, *bbox, densify_pts=21)
             win = from_bounds(*b, transform=src.transform).round_offsets().round_lengths()
-            if halo_px > 0:
+            hy, hx = _halo_rc(halo_px)
+            if hy or hx:
                 win = Window(
-                    win.col_off - halo_px,
-                    win.row_off - halo_px,
-                    win.width + 2 * halo_px,
-                    win.height + 2 * halo_px,
+                    win.col_off - hx,
+                    win.row_off - hy,
+                    win.width + 2 * hx,
+                    win.height + 2 * hy,
                 )
             arr = src.read(1, window=win, boundless=True, fill_value=nd)
             tr = src.window_transform(win)
@@ -267,14 +390,16 @@ def crop_to_bounds(arr, transform, bounds):
     return cropped, tr
 
 
-def crop_center(arr, transform, halo_px: int):
-    if halo_px <= 0:
+def crop_center(arr, transform, halo_px):
+    """Drop a halo that is an int or `(rows, cols)`."""
+    hy, hx = _halo_rc(halo_px)
+    if hy == 0 and hx == 0:
         return arr, transform
-    if arr.shape[0] <= 2 * halo_px or arr.shape[1] <= 2 * halo_px:
-        raise ValueError(f"array {arr.shape} too small to crop halo_px={halo_px}")
-    cropped = arr[halo_px:-halo_px, halo_px:-halo_px]
+    if arr.shape[0] <= 2 * hy or arr.shape[1] <= 2 * hx:
+        raise ValueError(f"array {arr.shape} too small to crop halo_px={halo_px!r}")
+    cropped = arr[hy:arr.shape[0] - hy, hx:arr.shape[1] - hx]
     tr = rasterio.windows.transform(
-        Window(halo_px, halo_px, cropped.shape[1], cropped.shape[0]),
+        Window(hx, hy, cropped.shape[1], cropped.shape[0]),
         transform,
     )
     return cropped, tr
@@ -309,16 +434,16 @@ def main(argv=None):
         p.error(f"--sigma-m must be finite and > 0, got {a.sigma_m!r}")
 
     core_bounds = None
-    halo_px = 0
+    halo_rc = (0, 0)
     if a.input:
         with rasterio.open(a.input) as src:
             peek_crs, peek_tr = src.crs, src.transform
         try:
-            px_peek = pixel_size_meters(peek_crs, peek_tr)
+            px_x_peek, px_y_peek = pixel_size_meters(peek_crs, peek_tr)
+            halo_rc = halo_pixels(a.sigma_m, px_x_peek, px_y_peek) if a.bbox else (0, 0)
         except ValueError as ex:
             sys.exit(str(ex))
-        halo_px = int(math.ceil(HALO_SIGMA_MULT * a.sigma_m / px_peek)) if a.bbox else 0
-        arr, tr, crs, nd = read_local(a.input, a.bbox, halo_px=halo_px)
+        arr, tr, crs, nd = read_local(a.input, a.bbox, halo_px=halo_rc)
         src_label = a.input
     else:
         errs = []
@@ -340,15 +465,15 @@ def main(argv=None):
     arr_pad, tr_pad = arr, tr
 
     try:
-        px = pixel_size_meters(crs, tr_pad)
+        px_x, px_y = pixel_size_meters(crs, tr_pad)
+        sigma_px = gaussian_sigma_px(a.sigma_m, px_x, px_y)
     except ValueError as ex:
         sys.exit(str(ex))
-    sigma_px = a.sigma_m / px
     lrm_pad = local_relief(arr_pad, nd, sigma_px)
 
-    if a.input and a.bbox and halo_px > 0:
-        lrm, tr = crop_center(lrm_pad, tr_pad, halo_px)
-        arr_core, _ = crop_center(arr_pad, tr_pad, halo_px)
+    if a.input and a.bbox and halo_rc != (0, 0):
+        lrm, tr = crop_center(lrm_pad, tr_pad, halo_rc)
+        arr_core, _ = crop_center(arr_pad, tr_pad, halo_rc)
     elif core_bounds is not None:
         lrm, tr = crop_to_bounds(lrm_pad, tr_pad, core_bounds)
         arr_core, _ = crop_to_bounds(arr_pad, tr_pad, core_bounds)
@@ -363,8 +488,10 @@ def main(argv=None):
         write_lrm(a.save_dtm, dtm_out, tr, crs)
 
     v = lrm[lrm != NODATA_OUT]
+    sy, sx = sigma_px
     print(
-        f"source={src_label} crs={crs} px={px}m shape={lrm.shape} sigma_px={sigma_px:.2f} "
+        f"source={src_label} crs={crs} px_x={px_x}m px_y={px_y}m shape={lrm.shape} "
+        f"sigma_px=({sy:.2f},{sx:.2f}) "
         f"valid={v.size} lrm_min={v.min() if v.size else 'na'} lrm_max={v.max() if v.size else 'na'} "
         f"-> {a.output}"
     )

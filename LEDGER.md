@@ -1,5 +1,44 @@
 # LEDGER — strata-mapping
 
+## 2026-11-11 07:37 America/Denver — Sense-Bedrock — Verity 0.82 test-quality cleanups
+
+- **Actor:** Sense-Bedrock
+- **Requested by:** Verity re-check of `9e3b3a9` (0.82, pass, small test-quality cleanups)
+- **Role:** executed
+- **Files:** `tests/test_warp_merge.py` (changed); `tests/test_live_smoke.py` (changed); `README.md` (changed); `CHANGELOG.md` (changed); `LEDGER.md` (changed)
+- **What was done:** East seam tile is written with `nodata=None` and about one 20 m pixel of overlap. The test requires `aligned[1].nodata == NODATA_OUT` and no 0 in the seam band. Temporarily restoring `WarpedVRT(src, crs=...)` made that test fail (`nodata` is None; seam band had 257 zeros). Slope test now requires east-of-seam mean error > 0.1 m. The 1.5 m cap is two half-pixel stages (0.7 m each, about 1.4 m) plus 0.1 m. Switching the warp to bilinear dropped the mean to 0.087 m and the lower bound failed. Dropped the OpenTopography "key not in srcs" assert and the TNM `_intersects_bbox` assert. Both `## [Unreleased] - 2026-11-11` changelog headings left in place; this note is under the later one. Pytest from repo root: 27 passed, 2 skipped. No CircleCI or workflow edits. No merge.
+- **Decisions:** Keep nearest resampling. The lower bound is what separates it from bilinear on this plane.
+- **Sources:** Verity re-check of `9e3b3a9`. Local mutation: old `WarpedVRT(s, crs=target_crs)`; bilinear `resampling` on the warp with merge left nearest.
+- **Commits / PRs:** branch `sensecrew/bedrock/issue-3-aniso-sigma` (this commit) → PR #5 into `daily/2026-11-05`, ready for review. Closes #3.
+- **Open / handoff:** Wait for CircleCI on this commit. Do not merge. Next owner: TriageChief / Audrey
+- **Credit note:** Sense-Bedrock test-quality follow-up after the 0.82 pass
+
+## 2026-11-11 07:25 America/Denver — Sense-Bedrock — Verity hold fixes on PR #5 (ready for review)
+
+- **Actor:** Sense-Bedrock
+- **Requested by:** Verity review of PR #5 at `e92d896` (PASS-with-hold 0.78; gate 0.80)
+- **Role:** executed
+- **Files:** `lrm_3dep.py` (changed); `tests/test_lrm.py` (changed); `tests/test_warp_merge.py` (changed); `tests/test_live_smoke.py` (changed); `README.md` (changed); `CHANGELOG.md` (changed); `LEDGER.md` (changed)
+- **What was done:** NaN in affine `b` or `d` is rejected (`not (abs(component) <= tol)`), with tests at the tolerance and just outside it. CLI `--input` + `--bbox` halo test computes its own per-axis halo. Mixed-CRS non-overlapping abutment asserts no nodata or zero between the two values. A plane crossing UTM zones bounds nearest-resample error (max < 1.5 m, east-of-seam mean < 0.8 m). OpenTopography smoke asserts shape, finite elevations, projected CRS, and bbox intersection. TNM smoke calls `read_tnm` (list and merge); the single-zone bbox does not open a live `WarpedVRT`. Pytest from repo root: 27 passed, 2 skipped. Correction: PR #5 is ready for review. The 07:10 row called it a draft; that row is unchanged. midnghtsapphire marked it ready and is the assignee. No merge; no workflow edits; nothing deleted.
+- **Decisions:** Keep nearest resampling and bound the slope artifact instead of switching kernels. Document that the live TNM bbox does not force `WarpedVRT`.
+- **Sources:** Verity review of PR #5; scipy `gaussian_filter` truncate of 4; rasterio nearest warp on a linear surface (half-pixel times gradient).
+- **Commits / PRs:** branch `sensecrew/bedrock/issue-3-aniso-sigma` (this commit) → PR #5 into `daily/2026-11-05`, ready for review. Closes #3.
+- **Open / handoff:** PR #5 is ready for review, not merged. Live smoke still not executed (`STRATA_LIVE_SMOKE` unset). Next owner: TriageChief / Audrey
+- **Credit note:** Sense-Bedrock follow-up on the Verity hold
+
+## 2026-11-11 07:10 America/Denver — Sense-Bedrock — anisotropic Gaussian sigma, warp/merge seams, opt-in live smoke (#3)
+
+- **Actor:** Sense-Bedrock
+- **Requested by:** issue #3 (follow-up to #2; TriageChief routing 2026-11-11). OpenHands comment 6724206545 ignored as out of scope.
+- **Role:** executed
+- **Files:** `lrm_3dep.py` (changed); `tests/test_lrm.py` (changed); `tests/test_warp_merge.py` (added); `tests/test_live_smoke.py` (added); `tests/conftest.py` (added); `README.md` (changed); `CHANGELOG.md` (changed); `LEDGER.md` (changed)
+- **What was done:** Gaussian sigma is per-axis from affine `|a|` and `|e|` (metres), not `mean(|a|, |e|)`. `local_relief` still accepts a scalar sigma; equal axes use `(sigma, sigma)`, which matches that scalar kernel. Rotation or shear (`b` or `d` nonzero) raises `ValueError` (no rotated kernel, no silent wrong radius). Mixed-CRS `WarpedVRT` sets nodata explicitly and uses nearest resampling so a missing nodata tag cannot fill seams with 0. Synthetic tests cover WarpedVRT resampling, tile-edge nodata seams, merge alignment, and boundless/nodata fill across CRS boundaries. Live TNM and OpenTopography smoke tests are marked `live_smoke` and skipped unless `STRATA_LIVE_SMOKE=1`; OpenTopography reads `OPENTOPO_API_KEY` from the environment only and skips if it is unset. Pytest from repo root: 23 passed, 2 skipped. No merge; no push to `daily/*` or `main`; no workflow files; nothing deleted.
+- **Decisions:** Reject rotation/shear instead of inventing a rotated kernel — separable `|a|`/`|e|` sigma is the wrong radius when `b` or `d` is nonzero. Keep the scalar `local_relief` path so existing square-pixel callers keep working.
+- **Sources:** Issue #3; scipy.ndimage `gaussian_filter` sigma axis order (row, col); rasterio `WarpedVRT` destination nodata defaults to 0 when the source tag is missing.
+- **Commits / PRs:** branch `sensecrew/bedrock/issue-3-aniso-sigma` (this commit) → draft PR into `daily/2026-11-05`. Closes #3.
+- **Open / handoff:** Draft PR left open for TriageChief. Live smoke was not executed in this run (`STRATA_LIVE_SMOKE` unset; no `OPENTOPO_API_KEY`). Next owner: TriageChief / Audrey
+- **Credit note:** Sense-Bedrock on issue #3
+
 ## 2026-11-06 10:30 America/Denver — MechSensorForge — correction to 2026-11-06 08:20 review-fix identifiers and 2026-11-05 Files inventory
 
 Prior 2026-11-06 08:20 review-fix ledger entry lost backtick identifiers (shell backtick expansion). Restoring the concrete identifiers here per the append-only / never-rewrite rule; the original entry below is left intact. The 2026-11-06 correction note to the 2026-11-05 entry also lost its filename.
