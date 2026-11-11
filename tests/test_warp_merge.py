@@ -2,6 +2,7 @@
 from __future__ import annotations
 import math
 import numpy as np
+import pytest
 import rasterio
 from rasterio.enums import Resampling
 from rasterio.transform import from_origin
@@ -197,91 +198,58 @@ def test_nodata_zero_stays_masked_across_crs(tmp_path, monkeypatch):
 
 
 def test_mixed_crs_abutting_tiles_have_no_seam_gap(tmp_path, monkeypatch):
-    """SYNTHETIC: two tiles share an edge and do not overlap. Different CRS.
+    """SYNTHETIC: east tile has no nodata tag and overlaps the west tile by about one pixel.
 
-    The east tile is the other UTM zone's image of the ground rectangle that
-    starts where the west tile ends. After warp+merge, no row has nodata or 0
-    between the west value and the east value.
+    The old WarpedVRT (no explicit nodata) initialises uncovered dest pixels to 0
+    and leaves nodata unset, so those zeros land on the seam columns. The fixed
+    path sets nodata to NODATA_OUT and does not write 0 there.
     """
-    from rasterio.warp import calculate_default_transform, reproject
-    x0, y0 = 756000.0, 4433200.0
     px = 20.0
-    height, width = 6, 6
-    seam = x0 + width * px
-    tr_w = from_origin(x0, y0, px, px)
-    tr_e = from_origin(seam, y0, px, px)
-    # Ground rectangles meet at `seam` and do not overlap.
-    assert tr_w.c + width * px == tr_e.c
-    west = np.full((height, width), 111.0, np.float32)
-    east_ground = np.full((height, width), 222.0, np.float32)
+    lat0, lat1 = 40.00, 40.01
+    # One 20 m pixel of longitude at this latitude.
+    overlap_deg = px / (111320.0 * math.cos(math.radians(40.0)))
     west_path = tmp_path / "west.tif"
     east_path = tmp_path / "east.tif"
-    with rasterio.open(
-        west_path, "w", driver="GTiff", height=height, width=width, count=1,
-        dtype="float32", crs="EPSG:26912", transform=tr_w, nodata=-9999.0,
-    ) as dst:
-        dst.write(west, 1)
-    dst_transform, dst_w, dst_h = calculate_default_transform(
-        "EPSG:26912", "EPSG:26913", width, height,
-        *rasterio.transform.array_bounds(height, width, tr_e),
-    )
-    warped_east = np.full((dst_h, dst_w), -9999.0, np.float32)
-    reproject(
-        source=east_ground,
-        destination=warped_east,
-        src_transform=tr_e,
-        src_crs="EPSG:26912",
-        src_nodata=-9999.0,
-        dst_transform=dst_transform,
-        dst_crs="EPSG:26913",
-        dst_nodata=-9999.0,
-        resampling=Resampling.nearest,
-    )
-    with rasterio.open(
-        east_path, "w", driver="GTiff", height=dst_h, width=dst_w, count=1,
-        dtype="float32", crs="EPSG:26913", transform=dst_transform, nodata=-9999.0,
-    ) as dst:
-        dst.write(warped_east, 1)
+    _write(west_path, 26912, -108.01, lat0, -108.0, lat1, 111.0, nodata=-9999.0, px=px)
+    _write(east_path, 26913, -108.0 - overlap_deg, lat0, -107.99, lat1, 222.0, nodata=None, px=px)
+    with rasterio.open(east_path) as east_src:
+        assert east_src.nodata is None
 
     aligned, crs, handles = _open_local(monkeypatch, [west_path, east_path])
     try:
         assert crs.to_epsg() == 26912
         assert isinstance(aligned[1], WarpedVRT)
-        west_bounds = aligned[0].bounds
-        # Extend only far enough to include the east tile. The shared edge is x=seam.
-        arr, tr, nd = m.merge_aligned(
-            aligned,
-            bounds=(west_bounds.left, west_bounds.bottom, seam + width * px, west_bounds.top),
-        )
-        assert int(np.sum(arr == 0)) == 0
-        seams = 0
+        assert aligned[1].nodata == m.NODATA_OUT
+        arr, _tr, nd = m.merge_aligned(aligned)
+        assert nd == m.NODATA_OUT
+        c111 = np.flatnonzero(np.any(arr == 111.0, axis=0))
+        c222 = np.flatnonzero(np.any(arr == 222.0, axis=0))
+        assert c111.size and c222.size
+        # About one pixel of overlap or a shared edge: the values meet.
+        assert abs(int(c222.min()) - int(c111.max())) <= 2
+        seam = arr[:, int(min(c111.max(), c222.min())):int(c222.max()) + 1]
+        assert not np.any(seam == 0)
+        met = 0
         for row in arr:
-            valid_cols = np.flatnonzero(row != nd)
-            assert valid_cols.size > 0
-            span = row[valid_cols[0]:valid_cols[-1] + 1]
-            assert nd not in span
-            assert not np.any(span == 0)
-            assert 111.0 in span and 222.0 in span
-            steps = np.flatnonzero(np.diff(span) != 0)
-            assert steps.size == 1
-            assert span[steps[0]] == 111.0 and span[steps[0] + 1] == 222.0
-            seams += 1
-        assert seams == arr.shape[0]
-        # The seam column sits on the shared edge, not a pixel inside either tile.
-        seam_col = int(round((seam - tr.c) / tr.a))
-        assert np.all(arr[:, seam_col - 1] == 111.0)
-        assert np.all(arr[:, seam_col] == 222.0)
+            a = np.flatnonzero(row == 111.0)
+            b = np.flatnonzero(row == 222.0)
+            if a.size and b.size and abs(int(b.min()) - int(a.max())) == 1:
+                met += 1
+        assert met > 10
     finally:
         for h in handles:
             h.close()
 
 
 def test_nearest_resample_slope_error_is_bounded(tmp_path, monkeypatch):
-    """SYNTHETIC plane sampled in two UTM zones. Nearest warp error stays within half a pixel of the slope.
+    """SYNTHETIC plane sampled in two UTM zones.
 
-    z = 1500 + 0.05*(x-x0) + 0.02*(y-y0) metres, with x,y in EPSG:26912.
-    Gradient magnitude is about 0.0539 / m. A 20 m pixel moves the sample by
-    up to ~10 m, so the resampling artifact is on the order of 0.5 m.
+    z = 1500 + 0.05*(x-x0) + 0.02*(y-y0) metres in EPSG:26912.
+    Nearest can land anywhere in the half-pixel box, so one stage errs by at
+    most |0.05|*10 + |0.02|*10 = 0.7 m on a 20 m pixel. The value is resampled
+    twice (WarpedVRT nearest, then merge nearest): about 1.4 m. The cap is
+    that worst case plus 0.1 m, i.e. 1.5 m. Mean error stays above 0.1 m;
+    bilinear on the warp falls below that.
     """
     x0, y0 = 756000.0, 4433200.0
     px = 20.0
@@ -351,10 +319,16 @@ def test_nearest_resample_slope_error_is_bounded(tmp_path, monkeypatch):
         errs = np.asarray(errs)
         east_errs = np.asarray(east_errs)
         assert errs.size > 50 and east_errs.size > 20
-        # Half a 20 m pixel times |grad z| ≈ 0.54 m. Allow grid snap up to 1.5 m.
-        assert float(east_errs.max()) < 1.5
+        # Half-pixel box: |0.05|*(px/2) + |0.02|*(px/2) = 0.7 m per nearest stage.
+        # Warp plus merge is two stages, about 1.4 m. Allow 0.1 m on top of that.
+        per_stage_m = abs(0.05) * (px / 2.0) + abs(0.02) * (px / 2.0)
+        limit_m = 2.0 * per_stage_m + 0.1
+        assert per_stage_m == pytest.approx(0.7)
+        assert limit_m == pytest.approx(1.5)
+        assert float(east_errs.max()) < limit_m
+        assert float(errs.max()) < limit_m
+        assert float(east_errs.mean()) > 0.1
         assert float(east_errs.mean()) < 0.8
-        assert float(errs.max()) < 1.5
     finally:
         for h in handles:
             h.close()

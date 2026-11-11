@@ -1,5 +1,18 @@
 # LEDGER — strata-mapping
 
+## 2026-11-11 07:37 America/Denver — Sense-Bedrock — Verity 0.82 test-quality cleanups
+
+- **Actor:** Sense-Bedrock
+- **Requested by:** Verity re-check of `9e3b3a9` (0.82, pass, small test-quality cleanups)
+- **Role:** executed
+- **Files:** `tests/test_warp_merge.py` (changed); `tests/test_live_smoke.py` (changed); `README.md` (changed); `CHANGELOG.md` (changed); `LEDGER.md` (changed)
+- **What was done:** East seam tile is written with `nodata=None` and about one 20 m pixel of overlap. The test requires `aligned[1].nodata == NODATA_OUT` and no 0 in the seam band. Temporarily restoring `WarpedVRT(src, crs=...)` made that test fail (`nodata` is None; seam band had 257 zeros). Slope test now requires east-of-seam mean error > 0.1 m. The 1.5 m cap is two half-pixel stages (0.7 m each, about 1.4 m) plus 0.1 m. Switching the warp to bilinear dropped the mean to 0.087 m and the lower bound failed. Dropped the OpenTopography "key not in srcs" assert and the TNM `_intersects_bbox` assert. Both `## [Unreleased] - 2026-11-11` changelog headings left in place; this note is under the later one. Pytest from repo root: 27 passed, 2 skipped. No CircleCI or workflow edits. No merge.
+- **Decisions:** Keep nearest resampling. The lower bound is what separates it from bilinear on this plane.
+- **Sources:** Verity re-check of `9e3b3a9`. Local mutation: old `WarpedVRT(s, crs=target_crs)`; bilinear `resampling` on the warp with merge left nearest.
+- **Commits / PRs:** branch `sensecrew/bedrock/issue-3-aniso-sigma` (this commit) → PR #5 into `daily/2026-11-05`, ready for review. Closes #3.
+- **Open / handoff:** Wait for CircleCI on this commit. Do not merge. Next owner: TriageChief / Audrey
+- **Credit note:** Sense-Bedrock test-quality follow-up after the 0.82 pass
+
 ## 2026-11-11 07:25 America/Denver — Sense-Bedrock — Verity hold fixes on PR #5 (ready for review)
 
 - **Actor:** Sense-Bedrock
