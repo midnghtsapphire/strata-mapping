@@ -1,6 +1,14 @@
 # Changelog
 
 ## [Unreleased] - 2026-11-11
+### Fixed
+- Rotation/shear rejection uses `not (abs(b) <= tol)` (and the same for `d`), so a NaN component fails closed instead of passing the comparison.
+### Added
+- Tolerance-edge and NaN affine tests; anisotropic halo checked through the CLI `--input` + `--bbox` path with expectations computed in the test.
+- Mixed-CRS abutment of two non-overlapping tiles (no nodata or zero at the seam) and a bound on nearest-resample error for a plane that crosses UTM zones.
+- Live smoke checks real shape, finite elevations, projected CRS, and bbox intersection. The TNM smoke calls `read_tnm` (merge). That bbox is one UTM zone, so it does not open a live `WarpedVRT`.
+
+## [Unreleased] - 2026-11-11
 ### Changed
 - Gaussian sigma uses per-axis pixel size from the affine (`|a|` and `|e|` independently, in metres) instead of `mean(|a|, |e|)`. Rotation or shear (`b` or `d` nonzero) raises `ValueError`.
 - Mixed-CRS `WarpedVRT` sets source and destination nodata explicitly and resamples with nearest, so a missing nodata tag cannot fill a seam with 0.

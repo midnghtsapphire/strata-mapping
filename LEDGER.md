@@ -1,5 +1,18 @@
 # LEDGER — strata-mapping
 
+## 2026-11-11 07:25 America/Denver — Sense-Bedrock — Verity hold fixes on PR #5 (ready for review)
+
+- **Actor:** Sense-Bedrock
+- **Requested by:** Verity review of PR #5 at `e92d896` (PASS-with-hold 0.78; gate 0.80)
+- **Role:** executed
+- **Files:** `lrm_3dep.py` (changed); `tests/test_lrm.py` (changed); `tests/test_warp_merge.py` (changed); `tests/test_live_smoke.py` (changed); `README.md` (changed); `CHANGELOG.md` (changed); `LEDGER.md` (changed)
+- **What was done:** NaN in affine `b` or `d` is rejected (`not (abs(component) <= tol)`), with tests at the tolerance and just outside it. CLI `--input` + `--bbox` halo test computes its own per-axis halo. Mixed-CRS non-overlapping abutment asserts no nodata or zero between the two values. A plane crossing UTM zones bounds nearest-resample error (max < 1.5 m, east-of-seam mean < 0.8 m). OpenTopography smoke asserts shape, finite elevations, projected CRS, and bbox intersection. TNM smoke calls `read_tnm` (list and merge); the single-zone bbox does not open a live `WarpedVRT`. Pytest from repo root: 27 passed, 2 skipped. Correction: PR #5 is ready for review. The 07:10 row called it a draft; that row is unchanged. midnghtsapphire marked it ready and is the assignee. No merge; no workflow edits; nothing deleted.
+- **Decisions:** Keep nearest resampling and bound the slope artifact instead of switching kernels. Document that the live TNM bbox does not force `WarpedVRT`.
+- **Sources:** Verity review of PR #5; scipy `gaussian_filter` truncate of 4; rasterio nearest warp on a linear surface (half-pixel times gradient).
+- **Commits / PRs:** branch `sensecrew/bedrock/issue-3-aniso-sigma` (this commit) → PR #5 into `daily/2026-11-05`, ready for review. Closes #3.
+- **Open / handoff:** PR #5 is ready for review, not merged. Live smoke still not executed (`STRATA_LIVE_SMOKE` unset). Next owner: TriageChief / Audrey
+- **Credit note:** Sense-Bedrock follow-up on the Verity hold
+
 ## 2026-11-11 07:10 America/Denver — Sense-Bedrock — anisotropic Gaussian sigma, warp/merge seams, opt-in live smoke (#3)
 
 - **Actor:** Sense-Bedrock

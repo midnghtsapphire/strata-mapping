@@ -96,12 +96,16 @@ def meters_per_crs_unit(crs) -> float:
 
 
 def _reject_rotated_or_sheared(transform) -> None:
-    """|a| and |e| are not the ground pixel size once the axes are rotated or sheared."""
+    """|a| and |e| are not the ground pixel size once the axes are rotated or sheared.
+
+    The predicate is `not (abs(component) <= tol)` so a NaN shear fails closed.
+    `abs(nan) > tol` is False, and that form would accept a NaN radius.
+    """
     b = float(transform.b)
     d = float(transform.d)
     scale = max(abs(float(transform.a)), abs(float(transform.e)), 1.0)
     tol = 1e-9 * scale
-    if abs(b) > tol or abs(d) > tol:
+    if not (abs(b) <= tol) or not (abs(d) <= tol):
         raise ValueError(
             "rotated or sheared affine is not supported for Gaussian sigma "
             f"(b={b}, d={d}; axis-aligned tolerance {tol:g}). "
@@ -114,8 +118,8 @@ def pixel_size_meters(crs, transform) -> tuple[float, float]:
 
     Returns `(px_x, px_y)` = `(|a|, |e|)` times the CRS linear-unit factor
     (column, then row). North-up rasters have `e < 0`; the sign is dropped.
-    Raises ValueError when `b` or `d` is non-zero (rotation or shear), or when
-    either axis is not a finite positive length.
+    Raises ValueError when `b` or `d` is outside the axis-aligned tolerance, including
+    NaN, or when either axis is not a finite positive length.
     """
     _reject_rotated_or_sheared(transform)
     to_m = meters_per_crs_unit(crs)

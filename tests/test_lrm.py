@@ -282,6 +282,34 @@ def test_rotation_or_shear_raises_value_error():
             m.pixel_size_meters(crs, tr)
 
 
+def test_rotation_tolerance_edges_and_nan():
+    """NaN must fail closed. Values at the tolerance stay axis-aligned; the next float does not."""
+    from rasterio.transform import Affine
+    crs = CRS.from_epsg(26913)
+    # scale = max(|a|, |e|, 1) = 4, so tol = 4e-9. Written here, not read back from production.
+    a, e = 4.0, -2.0
+    tol = 1e-9 * max(abs(a), abs(e), 1.0)
+    assert tol == 4e-9
+    just_inside_b = Affine(a, tol, 0.0, 0.0, e, 0.0)
+    just_inside_d = Affine(a, 0.0, 0.0, -tol, e, 0.0)
+    assert m.pixel_size_meters(crs, just_inside_b) == (4.0, 2.0)
+    assert m.pixel_size_meters(crs, just_inside_d) == (4.0, 2.0)
+    just_outside = math.nextafter(tol, math.inf)
+    assert just_outside > tol
+    outside = (
+        Affine(a, just_outside, 0.0, 0.0, e, 0.0),
+        Affine(a, -just_outside, 0.0, 0.0, e, 0.0),
+        Affine(a, 0.0, 0.0, just_outside, e, 0.0),
+        Affine(a, 0.0, 0.0, -just_outside, e, 0.0),
+        Affine(a, float("nan"), 0.0, 0.0, e, 0.0),
+        Affine(a, 0.0, 0.0, float("nan"), e, 0.0),
+        Affine(a, float("nan"), 0.0, float("nan"), e, 0.0),
+    )
+    for tr in outside:
+        with pytest.raises(ValueError, match="rotated or sheared"):
+            m.pixel_size_meters(crs, tr)
+
+
 def test_anisotropic_sigma_differs_from_mean_kernel():
     """SYNTHETIC impulse: per-axis sigma must match scipy and must not match the old mean."""
     from scipy.ndimage import gaussian_filter
@@ -327,6 +355,65 @@ def test_cli_anisotropic_pixels_and_rejects_shear(tmp_path):
         d.write(np.zeros((8, 8), dtype="float32"), 1)
     with pytest.raises(SystemExit, match="rotated or sheared"):
         m.main(["--input", str(sheared), "--sigma-m", "4", "-o", str(tmp_path / "nope.tif")])
+
+
+def test_cli_anisotropic_halo_bbox(tmp_path):
+    """CLI --input + --bbox uses a different halo on each axis.
+
+    Expected sigma and halo are derived in this test from the affine.
+    They are not taken from halo_pixels or gaussian_sigma_px.
+    """
+    from scipy.ndimage import gaussian_filter
+    px_x, px_y = 2.0, 1.0
+    sigma_m = 4.0
+    sigma_row = sigma_m / px_y
+    sigma_col = sigma_m / px_x
+    halo_rows = math.ceil(4.0 * sigma_row)
+    halo_cols = math.ceil(4.0 * sigma_col)
+    assert (halo_rows, halo_cols) == (16, 8)
+    assert halo_rows != halo_cols
+
+    height, width = 90, 70
+    x0, y0 = 500000.0, 4400100.0
+    yy, xx = np.mgrid[0:height, 0:width]
+    dtm = (1000.0 + 0.1 * xx + 0.05 * yy).astype("float32")
+    dtm[40:46, 30:36] -= 3.0
+    tr = from_origin(x0, y0, px_x, px_y)
+    path = tmp_path / "aniso.tif"
+    with rasterio.open(
+        path, "w", driver="GTiff", height=height, width=width, count=1, dtype="float32",
+        crs="EPSG:26913", transform=tr,
+    ) as dst:
+        dst.write(dtm, 1)
+
+    row0, row1 = 28, 60
+    col0, col1 = 18, 48
+    assert row0 >= halo_rows and col0 >= halo_cols
+    assert row1 + halo_rows <= height and col1 + halo_cols <= width
+    left = x0 + col0 * px_x
+    right = x0 + col1 * px_x
+    top = y0 - row0 * px_y
+    bottom = y0 - row1 * px_y
+    west, south, east, north = transform_bounds(
+        "EPSG:26913", "EPSG:4326", left, bottom, right, top, densify_pts=21
+    )
+    m.main([
+        "--input", str(path),
+        "--bbox", str(west), str(south), str(east), str(north),
+        "--sigma-m", str(sigma_m),
+        "-o", str(tmp_path / "out.tif"),
+    ])
+    padded = dtm[row0 - halo_rows:row1 + halo_rows, col0 - halo_cols:col1 + halo_cols].astype("float64")
+    smooth = gaussian_filter(padded, (sigma_row, sigma_col), mode="nearest")
+    expected = (padded - smooth)[halo_rows:padded.shape[0] - halo_rows, halo_cols:padded.shape[1] - halo_cols]
+    with rasterio.open(tmp_path / "out.tif") as out:
+        got = out.read(1)
+        assert got.shape == expected.shape == (row1 - row0, col1 - col0)
+        np.testing.assert_allclose(got, expected.astype("float32"), atol=1e-3)
+        assert abs(out.transform.a - px_x) < 1e-6
+        assert abs(out.transform.e + px_y) < 1e-6
+        assert abs(out.transform.c - left) < 1e-2
+        assert abs(out.transform.f - top) < 1e-2
 
 
 def test_live_smoke_sources_do_not_embed_an_api_key():
