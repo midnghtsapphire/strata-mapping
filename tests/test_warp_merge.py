@@ -197,12 +197,15 @@ def test_nodata_zero_stays_masked_across_crs(tmp_path, monkeypatch):
             h.close()
 
 
-def test_mixed_crs_abutting_tiles_have_no_seam_gap(tmp_path, monkeypatch):
-    """SYNTHETIC: east tile has no nodata tag and overlaps the west tile by about one pixel.
+def test_mixed_crs_seam_nodata_tag_and_no_zero_fill(tmp_path, monkeypatch):
+    """SYNTHETIC nodata and 0-fill guard, not a per-row continuity check.
 
-    The old WarpedVRT (no explicit nodata) initialises uncovered dest pixels to 0
-    and leaves nodata unset, so those zeros land on the seam columns. The fixed
-    path sets nodata to NODATA_OUT and does not write 0 there.
+    The east tile has no nodata tag and overlaps the west tile by about one pixel.
+    The old WarpedVRT (no explicit nodata) leaves nodata unset and initialises
+    uncovered dest pixels to 0, so those zeros land on the seam columns. This
+    test proves the warp's nodata is NODATA_OUT and that the seam band has no 0.
+    A few rows where 111 meets 222 only show the tiles touch. They do not claim
+    every row is continuous.
     """
     px = 20.0
     lat0, lat1 = 40.00, 40.01
@@ -248,8 +251,9 @@ def test_nearest_resample_slope_error_is_bounded(tmp_path, monkeypatch):
     Nearest can land anywhere in the half-pixel box, so one stage errs by at
     most |0.05|*10 + |0.02|*10 = 0.7 m on a 20 m pixel. The value is resampled
     twice (WarpedVRT nearest, then merge nearest): about 1.4 m. The cap is
-    that worst case plus 0.1 m, i.e. 1.5 m. Mean error stays above 0.1 m;
-    bilinear on the warp falls below that.
+    that worst case plus 0.1 m, i.e. 1.5 m. The real guard against bilinear
+    is `assert aligned[1].resampling == Resampling.nearest`. The 0.1 m mean
+    lower bound is only a weak secondary check.
     """
     x0, y0 = 756000.0, 4433200.0
     px = 20.0

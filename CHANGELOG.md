@@ -9,6 +9,9 @@
 - Live smoke checks real shape, finite elevations, projected CRS, and bbox intersection. The TNM smoke calls `read_tnm` (merge). That bbox is one UTM zone, so it does not open a live `WarpedVRT`.
 
 ## [Unreleased] - 2026-11-11
+### Changed
+- Renamed the mixed-CRS seam test to `test_mixed_crs_seam_nodata_tag_and_no_zero_fill`. It is a nodata and 0-fill guard, not a per-row continuity check.
+- Slope docstring and README: `resampling == nearest` is the guard against bilinear. The 0.1 m mean lower bound is only a weak secondary check. Thresholds unchanged.
 ### Fixed
 - Mixed-CRS seam test writes the east tile with no nodata tag and about one pixel of overlap, so the old `WarpedVRT` 0-fill fails it (`nodata` stays unset and the seam band contains zeros).
 ### Added
