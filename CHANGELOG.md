@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased] - 2026-11-11
+### Changed
+- Gaussian sigma uses per-axis pixel size from the affine (`|a|` and `|e|` independently, in metres) instead of `mean(|a|, |e|)`. Rotation or shear (`b` or `d` nonzero) raises `ValueError`.
+- Mixed-CRS `WarpedVRT` sets source and destination nodata explicitly and resamples with nearest, so a missing nodata tag cannot fill a seam with 0.
+### Added
+- Synthetic tests for mixed-CRS warp/merge resampling, nodata seams at tile edges, merge alignment, and boundless/nodata consistency.
+- Opt-in live TNM and OpenTopography smoke tests (`live_smoke` marker and `STRATA_LIVE_SMOKE=1`). OpenTopography reads `OPENTOPO_API_KEY` from the environment only and skips when it is unset.
+
 ## [Unreleased] - 2026-11-06
 ### Fixed
 - P1 `read_local`: boundless `fill_value` and returned nodata now use the same `effective_nodata()` (handles `None` and `0`).

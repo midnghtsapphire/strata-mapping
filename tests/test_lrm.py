@@ -229,11 +229,13 @@ def test_feet_crs_converts_sigma(tmp_path):
         d.write(dtm, 1)
     to_m = m.meters_per_crs_unit(CRS.from_epsg(2263))
     assert abs(to_m - 0.30480060960121924) < 1e-9
-    px = m.pixel_size_meters(CRS.from_epsg(2263), tr)
-    assert abs(px - to_m) < 1e-9
+    px_x, px_y = m.pixel_size_meters(CRS.from_epsg(2263), tr)
+    assert abs(px_x - to_m) < 1e-9
+    assert abs(px_y - to_m) < 1e-9
     m.main(["--input", str(path), "--sigma-m", "3", "-o", str(tmp_path / "out.tif")])
-    # sigma_px = 3 / px ≈ 9.84; CLI path is local_relief(arr, nd, sigma_px)
-    expected_sigma_px = 3.0 / px
+    # Square feet pixels: both axes match, so sigma_px = 3 / px ≈ 9.84.
+    # CLI path is local_relief(arr, nd, (sigma_row, sigma_col)).
+    expected_sigma_px = 3.0 / px_x
     with rasterio.open(tmp_path / "out.tif") as out:
         assert out.crs.to_epsg() == 2263
         # Fixture has no nodata pixels; nodata=None matches the (dtm, nodata, sigma_px) signature
@@ -254,3 +256,86 @@ def test_effective_nodata_helpers():
     assert m.effective_nodata(None) == m.NODATA_OUT
     assert m.effective_nodata(0) == 0.0
     assert m.effective_nodata(-9999) == -9999.0
+
+
+def test_pixel_size_is_per_axis_not_mean():
+    """SYNTHETIC: |a|=2 m, |e|=1 m. Mean would be 1.5; that value is not returned."""
+    from rasterio.transform import Affine
+    crs = CRS.from_epsg(26913)
+    tr = Affine(2.0, 0.0, 500000.0, 0.0, -1.0, 4400000.0)
+    px_x, px_y = m.pixel_size_meters(crs, tr)
+    assert px_x == 2.0
+    assert px_y == 1.0
+    assert (px_x, px_y) != (1.5, 1.5)
+    sy, sx = m.gaussian_sigma_px(4.0, px_x, px_y)
+    assert sy == 4.0 and sx == 2.0
+    assert m.halo_pixels(4.0, px_x, px_y) == (16, 8)
+
+
+def test_rotation_or_shear_raises_value_error():
+    from rasterio.transform import Affine
+    crs = CRS.from_epsg(26913)
+    shear_b = Affine(1.0, 0.25, 500000.0, 0.0, -1.0, 4400000.0)
+    shear_d = Affine(1.0, 0.0, 500000.0, -0.25, -1.0, 4400000.0)
+    for tr in (shear_b, shear_d):
+        with pytest.raises(ValueError, match="rotated or sheared"):
+            m.pixel_size_meters(crs, tr)
+
+
+def test_anisotropic_sigma_differs_from_mean_kernel():
+    """SYNTHETIC impulse: per-axis sigma must match scipy and must not match the old mean."""
+    from scipy.ndimage import gaussian_filter
+    dtm = np.zeros((80, 80), dtype="float64")
+    dtm[40, 40] = 10.0
+    sigma = m.gaussian_sigma_px(4.0, 2.0, 1.0)  # (row 4, col 2)
+    out = m.local_relief(dtm, None, sigma)
+    ref = dtm - gaussian_filter(dtm, sigma, mode="nearest")
+    np.testing.assert_allclose(out, ref, atol=1e-5)
+    mean_sigma = 4.0 / 1.5
+    mean_out = m.local_relief(dtm, None, mean_sigma)
+    assert not np.allclose(out, mean_out, atol=1e-3)
+    # Equal axes still accept a scalar, same result as a repeated pair.
+    iso = m.local_relief(dtm, None, 3.0)
+    np.testing.assert_allclose(iso, m.local_relief(dtm, None, (3.0, 3.0)), atol=1e-6)
+
+
+def test_cli_anisotropic_pixels_and_rejects_shear(tmp_path):
+    from rasterio.transform import Affine
+    dtm = np.zeros((40, 40), dtype="float32")
+    dtm[20, 20] = 5.0
+    tr = from_origin(500000, 4400000, 2.0, 1.0)
+    path = tmp_path / "aniso.tif"
+    with rasterio.open(
+        path, "w", driver="GTiff", height=40, width=40, count=1, dtype="float32",
+        crs="EPSG:26913", transform=tr, nodata=-9999.0,
+    ) as d:
+        d.write(dtm, 1)
+    m.main(["--input", str(path), "--sigma-m", "4", "-o", str(tmp_path / "out.tif")])
+    px_x, px_y = m.pixel_size_meters(CRS.from_epsg(26913), tr)
+    with rasterio.open(tmp_path / "out.tif") as out:
+        np.testing.assert_allclose(
+            out.read(1),
+            m.local_relief(dtm, -9999.0, m.gaussian_sigma_px(4.0, px_x, px_y)),
+            atol=1e-5,
+        )
+    sheared = tmp_path / "shear.tif"
+    bad = Affine(1.0, 0.2, 500000.0, 0.0, -1.0, 4400000.0)
+    with rasterio.open(
+        sheared, "w", driver="GTiff", height=8, width=8, count=1, dtype="float32",
+        crs="EPSG:26913", transform=bad,
+    ) as d:
+        d.write(np.zeros((8, 8), dtype="float32"), 1)
+    with pytest.raises(SystemExit, match="rotated or sheared"):
+        m.main(["--input", str(sheared), "--sigma-m", "4", "-o", str(tmp_path / "nope.tif")])
+
+
+def test_live_smoke_sources_do_not_embed_an_api_key():
+    """The opt-in smoke module and the client read the key from the environment only."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    blob = "\n".join(
+        p.read_text() for p in (root / "lrm_3dep.py", root / "tests" / "test_live_smoke.py")
+    )
+    assert 'os.environ.get("OPENTOPO_API_KEY")' in blob
+    assert "API_Key=" not in blob
+    assert "OPENTOPO_API_KEY=" not in blob

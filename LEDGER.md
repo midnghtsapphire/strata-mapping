@@ -1,5 +1,18 @@
 # LEDGER — strata-mapping
 
+## 2026-11-11 07:10 America/Denver — Sense-Bedrock — anisotropic Gaussian sigma, warp/merge seams, opt-in live smoke (#3)
+
+- **Actor:** Sense-Bedrock
+- **Requested by:** issue #3 (follow-up to #2; TriageChief routing 2026-11-11). OpenHands comment 6724206545 ignored as out of scope.
+- **Role:** executed
+- **Files:** `lrm_3dep.py` (changed); `tests/test_lrm.py` (changed); `tests/test_warp_merge.py` (added); `tests/test_live_smoke.py` (added); `tests/conftest.py` (added); `README.md` (changed); `CHANGELOG.md` (changed); `LEDGER.md` (changed)
+- **What was done:** Gaussian sigma is per-axis from affine `|a|` and `|e|` (metres), not `mean(|a|, |e|)`. `local_relief` still accepts a scalar sigma; equal axes use `(sigma, sigma)`, which matches that scalar kernel. Rotation or shear (`b` or `d` nonzero) raises `ValueError` (no rotated kernel, no silent wrong radius). Mixed-CRS `WarpedVRT` sets nodata explicitly and uses nearest resampling so a missing nodata tag cannot fill seams with 0. Synthetic tests cover WarpedVRT resampling, tile-edge nodata seams, merge alignment, and boundless/nodata fill across CRS boundaries. Live TNM and OpenTopography smoke tests are marked `live_smoke` and skipped unless `STRATA_LIVE_SMOKE=1`; OpenTopography reads `OPENTOPO_API_KEY` from the environment only and skips if it is unset. Pytest from repo root: 23 passed, 2 skipped. No merge; no push to `daily/*` or `main`; no workflow files; nothing deleted.
+- **Decisions:** Reject rotation/shear instead of inventing a rotated kernel — separable `|a|`/`|e|` sigma is the wrong radius when `b` or `d` is nonzero. Keep the scalar `local_relief` path so existing square-pixel callers keep working.
+- **Sources:** Issue #3; scipy.ndimage `gaussian_filter` sigma axis order (row, col); rasterio `WarpedVRT` destination nodata defaults to 0 when the source tag is missing.
+- **Commits / PRs:** branch `sensecrew/bedrock/issue-3-aniso-sigma` (this commit) → draft PR into `daily/2026-11-05`. Closes #3.
+- **Open / handoff:** Draft PR left open for TriageChief. Live smoke was not executed in this run (`STRATA_LIVE_SMOKE` unset; no `OPENTOPO_API_KEY`). Next owner: TriageChief / Audrey
+- **Credit note:** Sense-Bedrock on issue #3
+
 ## 2026-11-06 10:30 America/Denver — MechSensorForge — correction to 2026-11-06 08:20 review-fix identifiers and 2026-11-05 Files inventory
 
 Prior 2026-11-06 08:20 review-fix ledger entry lost backtick identifiers (shell backtick expansion). Restoring the concrete identifiers here per the append-only / never-rewrite rule; the original entry below is left intact. The 2026-11-06 correction note to the 2026-11-05 entry also lost its filename.
