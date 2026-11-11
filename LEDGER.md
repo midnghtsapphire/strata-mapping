@@ -1,5 +1,18 @@
 # LEDGER — strata-mapping
 
+## 2026-11-11 08:22 America/Denver — Sense-Bedrock — rename seam test and clarify resampling guard (follow-up to #5)
+
+- **Actor:** Sense-Bedrock
+- **Requested by:** TriageChief, after Verity PASS-with-hold on merged PR #5 (`715de4a8`)
+- **Role:** executed
+- **Files:** `tests/test_warp_merge.py` (changed); `README.md` (changed); `CHANGELOG.md` (changed); `LEDGER.md` (changed)
+- **What was done:** Renamed `test_mixed_crs_abutting_tiles_have_no_seam_gap` to `test_mixed_crs_seam_nodata_tag_and_no_zero_fill` and documented it as a nodata/0-fill guard, not a per-row continuity check. Slope docstring and README now say `resampling == nearest` is the guard against bilinear and the 0.1 m mean lower bound is only a weak secondary check. No thresholds changed. No CircleCI or workflow edits. Refs #3 and #5. Does not close them.
+- **Decisions:** Leave both existing changelog headings. This note is new lines under the later `## [Unreleased] - 2026-11-11` heading.
+- **Sources:** Sense-Verity review on PR #5 at `10c83d1`.
+- **Commits / PRs:** branch `sensecrew/bedrock/issue-3-seam-test-rename` (this commit) → draft PR into `daily/2026-11-05`.
+- **Open / handoff:** Draft PR, not merged, not marked ready. Next owner: TriageChief / Audrey
+- **Credit note:** Sense-Bedrock follow-up after #5 merged
+
 ## 2026-11-11 07:37 America/Denver — Sense-Bedrock — Verity 0.82 test-quality cleanups
 
 - **Actor:** Sense-Bedrock
