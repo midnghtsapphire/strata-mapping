@@ -2,7 +2,6 @@
 from __future__ import annotations
 import math
 import numpy as np
-import pytest
 import rasterio
 from rasterio.enums import Resampling
 from rasterio.transform import from_origin
@@ -323,12 +322,13 @@ def test_nearest_resample_slope_error_is_bounded(tmp_path, monkeypatch):
         errs = np.asarray(errs)
         east_errs = np.asarray(east_errs)
         assert errs.size > 50 and east_errs.size > 20
-        # Half-pixel box: |0.05|*(px/2) + |0.02|*(px/2) = 0.7 m per nearest stage.
-        # Warp plus merge is two stages, about 1.4 m. Allow 0.1 m on top of that.
+        # Derivation of the published cap, not the same expression as limit_m:
+        # one stage is |0.05|*(20/2) + |0.02|*(20/2) = 0.7 m, two nearest
+        # stages are 1.4 m, plus 0.1 m is the literal 1.5 m.
         per_stage_m = abs(0.05) * (px / 2.0) + abs(0.02) * (px / 2.0)
         limit_m = 2.0 * per_stage_m + 0.1
-        assert per_stage_m == pytest.approx(0.7)
-        assert limit_m == pytest.approx(1.5)
+        assert per_stage_m == 0.7
+        assert limit_m == 1.5
         assert float(east_errs.max()) < limit_m
         assert float(errs.max()) < limit_m
         assert float(east_errs.mean()) > 0.1

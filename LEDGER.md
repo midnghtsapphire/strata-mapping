@@ -1,5 +1,18 @@
 # LEDGER — strata-mapping
 
+## 2026-11-11 08:27 America/Denver — Sense-Bedrock — pin slope limit and log the #5 body correction (items 3 and 4 of #7)
+
+- **Actor:** Sense-Bedrock
+- **Requested by:** TriageChief, items 3 and 4 of issue #7
+- **Role:** executed
+- **Files:** `tests/test_warp_merge.py` (changed); `CHANGELOG.md` (changed); `LEDGER.md` (changed)
+- **What was done:** `test_nearest_resample_slope_error_is_bounded` still builds `limit_m` from the half-pixel formula and now asserts `limit_m == 1.5` exactly. The comment states the derivation (0.7 m per stage, two stages 1.4 m, plus 0.1 m). Other bounds were not loosened. Correction: the PR #5 body named the old tip `9e3b3a9` and described the old abutment test. The body was later corrected to tip `10c83d1`. The test was renamed in #8 to `test_mixed_crs_seam_nodata_tag_and_no_zero_fill`. Refs #7. Does not close it. No CircleCI or workflow edits.
+- **Decisions:** Pin with `== 1.5` because that value is exact for this formula, instead of `pytest.approx(1.5)`, which tracked the same arithmetic.
+- **Sources:** Issue #7 items 3 and 4. PR #5 body now shows tip `10c83d186ede5c255c00952618c3a662bfeecb38`.
+- **Commits / PRs:** branch `sensecrew/bedrock/issue-7-assert-ledger` (this commit) → draft PR into `daily/2026-11-05`.
+- **Open / handoff:** Draft PR, not merged, not marked ready. TriageChief closes #7. Next owner: TriageChief / Audrey
+- **Credit note:** Sense-Bedrock follow-up for #7 items 3 and 4
+
 ## 2026-11-11 08:22 America/Denver — Sense-Bedrock — rename seam test and clarify resampling guard (follow-up to #5)
 
 - **Actor:** Sense-Bedrock
