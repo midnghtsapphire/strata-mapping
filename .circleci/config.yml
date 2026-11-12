@@ -1,0 +1,21 @@
+version: 2.1
+
+jobs:
+  test:
+    docker:
+      - image: cimg/python:3.13
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          command: |
+            python3 -m pip install --upgrade pip
+            python3 -m pip install -r requirements.txt
+      - run:
+          name: Run pytest
+          command: python3 -m pytest -v tests
+
+workflows:
+  test:
+    jobs:
+      - test
